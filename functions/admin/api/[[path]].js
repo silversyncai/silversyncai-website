@@ -37,7 +37,10 @@ async function authenticate(request, env) {
   // The signed cookie is also issued by Access after browser login.
   const token = request.headers.get('Cf-Access-Jwt-Assertion') ||
     cookieValue(request, 'CF_Authorization');
-  if (!token) return false;
+  if (!token) {
+  console.error('CRM AUTH: No Access JWT received');
+  return false;
+}
   const parts = token.split('.');
   if (parts.length !== 3) return false;
   let header, payload;
@@ -52,8 +55,15 @@ async function authenticate(request, env) {
   if (!Number.isFinite(payload.exp) || payload.exp <= now ||
       !Number.isFinite(payload.iat) || payload.iat > now + 60 ||
       (Number.isFinite(payload.nbf) && payload.nbf > now + 60)) return false;
-  if (payload.iss !== `https://${team}` ||
-      !(Array.isArray(payload.aud) ? payload.aud : [payload.aud]).includes(audience)) return false;
+  if (payload.iss !== `https://${team}`) {
+  console.error('CRM AUTH: Issuer mismatch');
+  return false;
+}
+
+if (!(Array.isArray(payload.aud) ? payload.aud : [payload.aud]).includes(audience)) {
+  console.error('CRM AUTH: Audience mismatch');
+  return false;
+} [payload.aud]).includes(audience)) return false;
 
   const response = await fetch(`https://${team}/cdn-cgi/access/certs`);
   if (!response.ok) throw new Error('Unable to retrieve Access signing keys');
