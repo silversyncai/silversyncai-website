@@ -1,5 +1,4 @@
-
- // Cloudflare Pages Function for /admin/api/*
+// Cloudflare Pages Function for /admin/api/*
  // Secure SilverSync AI CRM API
 
 const reply = (data, status = 200) =>
@@ -68,11 +67,11 @@ async function authenticate(request, env) {
     request.headers.get("Cf-Access-Jwt-Assertion") ||
     cookieValue(request, "CF_Authorization");
 
-  if (!token) return false;
+  if (!token) return "no_token";
 
   const parts = token.split(".");
 
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return "malformed_token";
 
   let header;
   let payload;
@@ -81,14 +80,14 @@ async function authenticate(request, env) {
     header = decodeJSON(parts[0]);
     payload = decodeJSON(parts[1]);
   } catch {
-    return false;
+    return "malformed_token";
   }
 
   if (
     header.alg !== "RS256" ||
     typeof header.kid !== "string"
   ) {
-    return false;
+    return "bad_algorithm";
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -101,12 +100,12 @@ async function authenticate(request, env) {
     (Number.isFinite(payload.nbf) &&
       payload.nbf > now + 60)
   ) {
-    return false;
+    return "token_expired";
   }
 
   // Verify Cloudflare Access issuer
   if (payload.iss !== `https://${team}`) {
-    return false;
+    return "team_domain_mismatch";
   }
 
   // Correctly handle single or multiple audiences
@@ -115,7 +114,7 @@ async function authenticate(request, env) {
     : [payload.aud];
 
   if (!audiences.includes(audience)) {
-    return false;
+    return "aud_mismatch";
   }
 
   // Retrieve Cloudflare Access signing keys
@@ -135,7 +134,7 @@ async function authenticate(request, env) {
     k => k.kid === header.kid && k.kty === "RSA"
   );
 
-  if (!jwk) return false;
+  if (!jwk) return "signing_key_not_found";
 
   const key = await crypto.subtle.importKey(
     "jwk",
@@ -148,7 +147,7 @@ async function authenticate(request, env) {
     ["verify"]
   );
 
-  return crypto.subtle.verify(
+  const signatureOk = await crypto.subtle.verify(
     "RSASSA-PKCS1-v1_5",
     key,
     base64urlBytes(parts[2]),
@@ -156,6 +155,8 @@ async function authenticate(request, env) {
       `${parts[0]}.${parts[1]}`
     )
   );
+
+  return signatureOk ? "ok" : "bad_signature";
 }
 
 const allowed = [
@@ -191,9 +192,10 @@ export async function onRequest({
     );
   }
 
-  if (!valid) {
+  if (valid !== "ok") {
+    // Temporary diagnostic: reason code only, no secrets
     return reply(
-      { error: "Unauthorized" },
+      { error: "Unauthorized", reason: valid },
       401
     );
   }
